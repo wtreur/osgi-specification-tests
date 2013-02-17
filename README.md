@@ -1,5 +1,4 @@
-# OSGi specification testframework
-=================================
+# OSGi specification tests
 
 This projects contains a tests for testing the specification conformance of multiple OSGi framework implementations.
 The tests are executed using the [OSGi specification testframework](https://github.com/wtreur/osgi-specification-test-framework)
