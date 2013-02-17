@@ -54,7 +54,7 @@
             -Dsvn-username=john
             -Dsvn-password=doe
 -->
-<project name="framework-test-nightly" default="test">
+<project name="osgi-specification-tests" default="test">
 	
     <taskdef resource="net/sf/antcontrib/antlib.xml" classpath="lib/ant-contrib-1.0b3.jar" />
 	<typedef resource="org/tigris/subversion/svnant/svnantlib.xml">
