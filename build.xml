@@ -1,0 +1,445 @@
+<!--
+   Licensed to the Apache Software Foundation (ASF) under one or more
+   contributor license agreements.  See the NOTICE file distributed with
+   this work for additional information regarding copyright ownership.
+   The ASF licenses this file to You under the Apache License, Version 2.0
+   (the "License"); you may not use this file except in compliance with
+   the License.  You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ -->
+<!--
+    Ant file to run the different kinds of framework tests and create/host the testreport
+    
+    *********************
+    *** Target "test" ***
+    *********************
+        Runs the JUnit tests in the Test Framework.
+        This target needs the following parameters that can be passed via the commandline with the -Dname option.
+        
+        - osgi-vendors:         Comma separated list of OSGi frameworks to test. Only the supported
+                                vendors by Pax Exam can be used. Use 'all' for all available frameworks
+                                Use latest-build as version to test the latest available (nightly) build.
+                                eg: felix/latest-build (Only supported for felix and knopflerfish)
+
+        Full example:
+        $ ant test
+            -Dosgi-vendors=felix/2.0.0,knopflerfish/latest-build,equinox/2.5.0
+    
+    **********************************
+    *** Target "create-testreport" ***
+    **********************************
+        Creates a testreport from JUnit xml files
+    
+    **********************************
+    *** Target "export-testreport" ***
+    **********************************     
+            
+       Transfers the results to a remote svn repository 
+       This target needs the following parameters that can be passed via the commandline with the -Dname option.
+        - svn-trunk:     URI of the subversion trunk
+        - svn-username:  Username used to access the svn trunk
+        - svn-password:  Password used to access the svn trunk
+        
+        Full example:
+        $ ant clean, test, export-testresults
+            -Dosgi-vendors=felix/2.0.0,equinox/2.5.0
+            -Dsvn-trunk=http://svn.acme.com/test-results/trunk/
+            -Dsvn-username=john
+            -Dsvn-password=doe
+-->
+<project name="framework-test-nightly" default="test">
+	
+    <taskdef resource="net/sf/antcontrib/antlib.xml" classpath="lib/ant-contrib-1.0b3.jar" />
+	<typedef resource="org/tigris/subversion/svnant/svnantlib.xml">
+        <classpath>
+            <fileset dir="lib/svnant/">
+                <include name="svnjavahl.jar"/>
+                <include name="svnkit.jar"/>
+                <include name="svnClientAdapter.jar"/>
+                <include name="svnant.jar"/>
+            </fileset>
+        </classpath>
+    </typedef>
+	
+	<!--==========-->
+    <!-- Settings -->
+    <!--==========-->
+	
+	<property name="tmp.test.results.dir" value="${java.io.tmpdir}/osgi-test-results" />
+	<property name="osgi.testframework" value="ext/osgitest-framework.jar"/>
+	<property name="felix.remote.trunk" value="http://svn.apache.org/repos/asf/felix/trunk"/>
+	<property name="knopflerfish.latest.build" value="http://www.knopflerfish.org/snapshots/current_trunk/osgi/framework.jar"/>
+	<property name="equinox.mirror" value="http://download.eclipse.org/eclipse/updates/3.6-N-builds"/>
+	
+	<path id="compile.classpath">
+		<pathelement location="${osgi.testframework}"/>
+		<pathelement location="ext/osgitest-testhelper.jar"/>
+		<pathelement path="classes" />
+	</path>
+	
+	<path id="test.classpath">
+		<pathelement location="${osgi.testframework}"/>
+		<pathelement path="classes" />
+	</path>
+	
+	
+	
+    <!--================-->
+    <!-- Initialization -->
+    <!--================-->
+	
+	<target name="init">
+		<mkdir dir="test-output" />
+		<mkdir dir="tmp" />
+		<mkdir dir="classes" />
+		
+		<mkdir dir="tmp/java" />
+		
+		<!-- assign @basedir@ token in platform definition files -->
+		<mkdir dir="tmp/platform-definitions/"/>
+        <copy todir="tmp/platform-definitions/">
+            <fileset dir="etc/platform-definitions/">
+                <include name="**/*"/>
+            	<exclude name="**/*.tpl.xml"/>
+            </fileset>
+        </copy>
+        <for param="file">
+            <path>
+                <fileset dir="tmp/platform-definitions/">
+                    <include name="**/*.xml"/>
+                </fileset>
+            </path>
+            <sequential>
+                <replace file="@{file}" token="@basedir@" value="file:${basedir}" />
+            </sequential>
+        </for>
+	</target>
+	
+	<target name="clean">
+		<delete dir="${java.io.tmpdir}/paxexam_runner_${user.name}" />
+		<delete dir="test-output" />
+		<delete dir="tmp" />
+		<delete dir="classes" />
+	</target>
+	
+	<target name="build" depends="init">
+		<echo>Building tests</echo>
+		<java classname="org.apache.tools.ant.launch.Launcher" fork="true" failonerror="true">
+            <classpath>
+                <pathelement location="lib/ecj.jar" />
+                <pathelement location="${ant.home}/lib/ant.jar" />
+                <pathelement location="${ant.home}/lib/ant-launcher.jar" />
+            </classpath>
+            <jvmarg line="-Dbuild.compiler=org.eclipse.jdt.core.JDTCompilerAdapter" />
+            <arg line="build-test" />
+        </java>
+		
+		<if>
+            <matches string="${osgi-vendors}">
+                <regexp pattern="felix/latest-build" />
+            </matches>
+            <then>
+                <echo>Building felix</echo>
+            	<antcallback target="build-felix" return="osgi-vendors" />
+            </then>
+        </if>
+		
+		<if>
+            <matches string="${osgi-vendors}">
+                <regexp pattern="knopflerfish/latest-build" />
+            </matches>
+            <then>
+                <echo>Building knopflerfish</echo>
+                <antcallback target="build-knopflerfish" return="osgi-vendors" />
+            </then>
+        </if>
+		
+		<if>
+            <matches string="${osgi-vendors}">
+                <regexp pattern="equinox/latest-build" />
+            </matches>
+            <then>
+                <echo>Building equinox</echo>
+                <antcallback target="build-equinox" return="osgi-vendors" />
+            </then>
+        </if>
+    </target>
+	
+	<target name="build-test" depends="init">
+        <javac srcdir="src" destdir="classes" debug="on" nowarn="on" source="1.5"
+        	target="1.5" failonerror="true" classpathref="compile.classpath" />
+    </target>
+	
+	<!--=========================-->
+    <!-- Retrieve latest builds -->
+    <!--=========================-->
+	
+	<target name="build-felix">
+		<condition property="mvn" value="mvn.bat">
+			<os family="dos" />
+		</condition>
+		<condition property="mvn" value="mvn">
+			<not>
+				<isset property="mvn" />
+			</not>
+		</condition>
+
+		<property name="felix.local.trunk" value="${basedir}/tmp/frameworks/felix/trunk"/>
+		
+		<echo level="info">Checkout felix from trunk</echo>
+        <mkdir dir="${felix.local.trunk}" />
+        <svn svnkit="true">
+            <checkout url="${felix.remote.trunk}/org.osgi.core/" destpath="${felix.local.trunk}/org.osgi.core/" revision="HEAD" />
+        	<checkout url="${felix.remote.trunk}/org.osgi.foundation/" destpath="${felix.local.trunk}/org.osgi.foundation/" revision="HEAD" />
+        	<checkout url="${felix.remote.trunk}/org.osgi.compendium/" destpath="${felix.local.trunk}/org.osgi.compendium/" revision="HEAD" />
+        	<checkout url="${felix.remote.trunk}/shell.tui/" destpath="${felix.local.trunk}/shell.tui/" revision="HEAD" />
+        	<checkout url="${felix.remote.trunk}/bundlerepository/" destpath="${felix.local.trunk}/bundlerepository/" revision="HEAD" />
+            <checkout url="${felix.remote.trunk}/framework" destpath="${felix.local.trunk}/framework" revision="HEAD" />
+            <checkout url="${felix.remote.trunk}/main" destpath="${felix.local.trunk}/main" revision="HEAD" />
+        	
+        	<info propprefix="felix.trunkinfo." target="${felix.remote.trunk}" />
+        </svn>
+		
+		<property name="felix.trunk.def.file" value="tmp/platform-definitions/felix/revision-${felix.trunkinfo.rev}.xml"/>
+		
+		<echo level="info">Building felix from trunk</echo>
+		<echo level="info">Building org.osgi.core</echo>
+		<exec executable="${mvn}" failonerror="false" dir="${felix.local.trunk}/org.osgi.core/">
+			<arg line="install" />
+		</exec>
+		<echo level="info">Building org.osgi.foundation</echo>
+		<exec executable="${mvn}" failonerror="false" dir="${felix.local.trunk}/org.osgi.foundation/">
+            <arg line="install" />
+        </exec>
+		<echo level="info">Building org.osgi.compendium</echo>
+		<exec executable="${mvn}" failonerror="false" dir="${felix.local.trunk}/org.osgi.compendium/">
+            <arg line="install" />
+        </exec>
+		<echo level="info">Building shell.tui</echo>
+		<exec executable="${mvn}" failonerror="false" dir="${felix.local.trunk}/shell.tui/">
+			<arg line="install" />
+        </exec>
+		<echo level="info">Building bundlerepository</echo>
+		<exec executable="${mvn}" failonerror="false" dir="${felix.local.trunk}/bundlerepository/">
+            <arg line="install" />
+        </exec>
+		<echo level="info">Building framework</echo>
+        <exec executable="${mvn}" failonerror="false" dir="${felix.local.trunk}/framework/">
+            <arg value="install" /> 
+        </exec>
+		<echo level="info">Building main</echo>
+        <exec executable="${mvn}" failonerror="false" dir="${felix.local.trunk}/main/">
+            <arg value="install" /> 
+        </exec>
+		
+		<available file="${felix.local.trunk}/main/bin/felix.jar" property="felixAvailable" />
+		<if>
+		    <isset property="felixAvailable"/>
+			<else>
+				<echo level="error">Felix not successfully build from trunk</echo> 
+			</else>
+		</if>
+
+		<echo level="info">Preparing definition file for Felix trunk</echo>
+		<copy file="etc/platform-definitions/felix/latest-build.tpl.xml" tofile="${felix.trunk.def.file}" />
+		<replace file="${felix.trunk.def.file}" token="@trunk-binary@" value="file:${felix.local.trunk}/main/bin/felix.jar" />
+		<propertyregex property="osgi-vendors" input="${osgi-vendors}" regexp="felix/latest-build" replace="felix/revision-${felix.trunkinfo.rev}" override="true" />
+	</target>
+	
+	<target name="build-knopflerfish">
+		<property name="knopflerfish.dir" value="${basedir}/tmp/frameworks/knopferflish/" />
+		<property name="knopflerfish.local" value="${knopflerfish.dir}/framework.jar" />
+		
+		<mkdir dir="${knopflerfish.dir}" />
+		<echo level="info">Download latest Knopflerfish build</echo>
+		<get dest="${knopflerfish.local}" src="${knopflerfish.latest.build}" />
+
+		<echo level="info">Determine Knopflerfish release name</echo>
+		<unzip src="${knopflerfish.local}" dest="${knopflerfish.dir}" />
+		<available file="${knopflerfish.dir}/release" property="knopflerfishRelease" />
+        <if>
+            <isset property="knopflerfishRelease"/>
+        	<then>
+        		<loadfile property="knopflerfish.revision.max" srcfile="${knopflerfish.dir}/release" />
+        	</then>
+            <else>
+            	<property name="knopflerfish.revision.max" value="latest-build"/>
+            </else>
+        </if>
+		
+		<echo level="info">Preparing definition file for Knopflerfish trunk</echo>
+		<property name="knopflerfish.dir.snapshot.def.file" value="tmp/platform-definitions/knopflerfish/${knopflerfish.revision.max}.xml"/>
+		<copy file="etc/platform-definitions/knopflerfish/latest-build.tpl.xml" tofile="${knopflerfish.dir.snapshot.def.file}" />
+		<replace file="${knopflerfish.dir.snapshot.def.file}" token="@binary-location@" value="${knopflerfish.latest.build}" />
+		<propertyregex property="osgi-vendors" input="${osgi-vendors}" regexp="knopflerfish/latest-build" replace="knopflerfish/${knopflerfish.revision.max}" override="true" />
+	</target>
+	
+	
+	<target name="build-equinox">
+		<property name="equinox.dir" value="${basedir}/tmp/frameworks/equinox/" />
+		
+		<mkdir dir="${equinox.dir}" />
+		<java jar="ext/antrunner/org.eclipse.equinox.launcher.jar" fork="true">
+			<arg value="-application"/>
+			<arg value="org.eclipse.ant.core.antRunner" />
+			<arg value="-buildfile" />
+			<arg value="var/get-equinox.xml" />
+			<arg value="-Dmirror=${equinox.mirror}" />
+			<arg value="-Ddestination=file:${equinox.dir}" />
+		</java>
+		
+		<copy todir="${equinox.dir}">
+			<fileset dir="${equinox.dir}/plugins/">
+				<include name="org.eclipse.osgi_*.jar" />
+			</fileset>
+			<mapper from="*" to="equinox.jar" type="merge"/>
+		</copy>
+		
+		<path id="equinox.file.id">
+		    <fileset dir="${equinox.dir}/plugins/">
+		    	<include name="org.eclipse.osgi_*.jar"/>
+		    </fileset>
+		</path>
+
+		<property name="equinox.file" refid="equinox.file.id"/>
+		<propertyregex property="equinox.build.id" input="${equinox.file}" regexp="${equinox.dir}plugins/org.eclipse.osgi_(.+).jar" replace="\1" override="true" />
+		<property name="equinox.dir.snapshot.def.file" value="tmp/platform-definitions/equinox/${equinox.build.id}.xml"/>
+		
+		<copy file="etc/platform-definitions/equinox/latest-build.tpl.xml" tofile="${equinox.dir.snapshot.def.file}" />
+		<replace file="${equinox.dir.snapshot.def.file}" token="@binary-location@" value="file:${equinox.file}" />
+		
+		<propertyregex property="osgi-vendors" input="${osgi-vendors}" regexp="equinox/latest-build" replace="equinox/${equinox.build.id}" override="true" />
+	</target>
+	
+    <!--=========-->
+    <!-- Testing -->
+    <!--=========-->
+	
+	<target name="test" description="Run all the tests in the testing framework">
+		<antcallback target="build" return="osgi-vendors" />
+		
+        <java classname="org.apache.tools.ant.launch.Launcher" fork="true" failonerror="true">
+            <classpath>
+                <pathelement location="${osgi.testframework}" />
+                <pathelement location="${ant.home}/lib/ant-launcher.jar" />
+            	<pathelement location="var/frameworks/felix/org.apache.felix.main-2.0.2.jar" />
+            </classpath>
+            <arg line="run-test -Dosgi-vendors=${osgi-vendors}" />
+        </java>
+    </target>
+	
+	<target name="run-test" description="Run all the tests in the testing framework. Should be invoked by ant target: 'test'">
+		<echo  level="info" message="Running tests for ${osgi-vendors}" />
+		<taskdef name="osgitest" id="osgitest" classname="net.luminis.osgitest.ant.OSGiTestTask" classpathref="test.classpath" />
+		
+		<osgitest vendors="${osgi-vendors}" platformDefinitionDir="file:${basedir}/tmp/platform-definitions/">
+			
+			<jvmarg value="-Djava.io.tmpdir=${basedir}/tmp/java" />
+			
+			<batchtest todir="test-output/">
+				<fileset dir="classes/">
+					<include name="net/luminis/osgitest/test/adhoc/AdHocTest.class" />
+					<include name="net/luminis/osgitest/test/framework/modulelayer/ClassPathTest.class" />
+					<include name="net/luminis/osgitest/test/framework/modulelayer/FragmentTest.class" />
+					<include name="net/luminis/osgitest/test/framework/modulelayer/ServiceTest.class" />
+					<include name="net/luminis/osgitest/test/framework/modulelayer/WiringTest.class" />
+					<include name="net/luminis/osgitest/test/framework/modulelayer/WiringTestUses.class" />
+					<include name="net/luminis/osgitest/test/framework/util/ldap/FrameworkFilterDictionaryTest.class" />
+					<include name="net/luminis/osgitest/test/framework/util/ldap/FrameworkFilterSyntaxTest.class" />
+				</fileset>
+			</batchtest>
+			<classpath>
+				<path refid="test.classpath" />
+			</classpath>
+			
+			<testDependency>
+                <fileset dir="ext">
+                    <include name="osgitest-testhelper.jar" />
+                </fileset>
+            </testDependency>
+			
+		</osgitest>
+	</target>
+	
+
+	
+	<!--=================-->
+    <!-- Report & Export -->
+	<!--=================-->
+	
+	<target name="create-testreport" description="Creates a JUnit testreport output" >
+		<unzip dest="tmp/test-output-resources" src="lib/osgitest-result-resources.jar">
+            <patternset>
+                <include name="**/*" />
+            </patternset>
+        </unzip>
+        <junitreport>
+            <fileset dir="test-output/">
+                <include name="TEST-*.xml" />
+            </fileset>
+            <report format="frames" styledir="tmp/test-output-resources/junit-styles" todir="test-output/" />
+        </junitreport>
+        <mkdir dir="test-output/resources"/>
+		<copy todir="test-output/resources">
+            <fileset dir="tmp/test-output-resources/web/">
+                <include name="**/*" />
+            </fileset>
+        </copy>
+    </target>
+	
+	
+	<target name="export-testreport" description="Commit the JUnit testreport in a svn-trunk">
+        <mkdir dir="${java.io.tmpdir}/osgi-testresults/" />
+        
+        <svn username="${svn-username}" password="${svn-password}" svnkit="true">
+            <checkout url="${svn-trunk}" destpath="${tmp.test.results.dir}" />
+            <delete>
+                <fileset dir="${tmp.test.results.dir}">
+                    <include name="**/*"/>
+                </fileset>
+            </delete>
+            <commit message="Removed old testresults." dir="${tmp.test.results.dir}/" />
+        </svn>
+        
+        <copy todir="${tmp.test.results.dir}">
+            <fileset dir="test-output/">
+                <include name="**/*"/>
+            </fileset> 
+        </copy>
+        
+        <svn username="${svn-username}" password="${svn-password}" svnkit="true">
+            <add>
+                <fileset dir="${tmp.test.results.dir}">
+                    <include name="**/*"/>
+                </fileset>
+            </add>
+        </svn>
+                    
+        <for param="file">
+            <path>
+                <fileset dir="${tmp.test.results.dir}">
+                    <include name="**/*.html"/>
+                </fileset>
+            </path>
+            <sequential>
+                <svn username="${svn-username}" password="${svn-password}" svnkit="true">
+                    <propset name="svn:mime-type" value="text/html" path="@{file}" />
+                </svn>
+            </sequential>
+        </for>
+                        
+        <svn username="${svn-username}" password="${svn-password}" svnkit="true">
+            <commit message="Updated testresults for frameworks: ${osgi-vendors}" dir="${tmp.test.results.dir}/" />
+        </svn>
+        
+        <delete dir="${tmp.test.results.dir}" />
+    </target>
+	
+</project>

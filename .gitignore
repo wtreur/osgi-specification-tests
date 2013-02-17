@@ -1,0 +1,6 @@
+*.iml
+.idea
+TESTS-TestSuites.xml
+/tmp
+/classes
+/test-output

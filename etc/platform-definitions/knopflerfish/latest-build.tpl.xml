@@ -1,0 +1,8 @@
+<platform>
+
+  <name>Knopflerfish Latest Build</name>
+  <system>@binary-location@</system>
+
+  <profile name="minimal" default="true"/>
+
+</platform>

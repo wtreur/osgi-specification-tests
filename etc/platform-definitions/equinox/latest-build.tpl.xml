@@ -1,0 +1,8 @@
+<platform>
+
+  <name>Equinox latest build</name>
+  <system>@binary-location@</system>
+
+  <profile name="minimal" default="true"/>
+  
+</platform>
